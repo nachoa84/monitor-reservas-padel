@@ -74,7 +74,11 @@ def log(mensaje):
 
 def setup_driver():
     """Configura el navegador Chrome usando webdriver-manager"""
-    chrome_options = Options()
+    # Configuración específica para GitHub Actions
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        os.environ['WDM_LOCAL'] = '0'
+        os.environ['WDM_SSL_VERIFY'] = '0'
+        os.environ['WDM_LOG_LEVEL'] = '0'
     
     # Configuración para entorno cloud
     chrome_options.add_argument("--headless=new")  # Headless moderno
