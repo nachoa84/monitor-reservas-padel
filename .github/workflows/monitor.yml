@@ -1,6 +1,14 @@
 name: Monitor Reservas Pádel
 
 on:
+  # Ejecución manual desde GitHub
+  workflow_dispatch:
+    inputs:
+      descripcion:
+        description: 'Descripción de la ejecución manual'
+        required: false
+        default: 'Ejecución manual iniciada'
+
   # Ejecución programada (UTC -3 horas para Argentina)
   schedule:
     # Miércoles 21:50-23:00 (cada 10 minutos) → UTC: 00:50-02:00
@@ -21,14 +29,6 @@ on:
     - cron: '15 9 * * 4'  # Jueves 09:15 UTC
     - cron: '30 9 * * 4'  # Jueves 09:30 UTC
     - cron: '45 9 * * 4'  # Jueves 09:45 UTC
-    
-  # Ejecución manual desde GitHub
-  workflow_dispatch:
-    inputs:
-      descripcion:
-        description: 'Descripción de la ejecución manual'
-        required: false
-        default: 'Ejecución manual iniciada'
 
 jobs:
   monitor:
