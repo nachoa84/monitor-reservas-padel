@@ -1,4 +1,4 @@
-name: Monitor Pádel - Versión Funcional
+name: 🤖 Monitor Pádel - Versión Corregida
 
 on:
   workflow_dispatch:
@@ -15,6 +15,8 @@ on:
     - cron: '10 2 * * 3'    # 23:10 ARG
     - cron: '20 2 * * 3'    # 23:20 ARG
     - cron: '30 2 * * 3'    # 23:30 ARG
+    - cron: '40 2 * * 3'    # 23:40 ARG
+    - cron: '50 2 * * 3'    # 23:50 ARG
     
     # Jueves 06:00 a 08:00 (hora Argentina, UTC-3)
     - cron: '0 9 * * 4'     # 06:00 ARG
@@ -25,115 +27,121 @@ on:
     - cron: '15 10 * * 4'   # 07:15 ARG
     - cron: '30 10 * * 4'   # 07:30 ARG
     - cron: '45 10 * * 4'   # 07:45 ARG
+    - cron: '0 11 * * 4'    # 08:00 ARG
 
 jobs:
-  monitor-padel:
+  monitor:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     
     steps:
-    - name: Checkout código
-      uses: actions/checkout@v4
+    - name: 📥 Checkout código
+      uses: actions/checkout@v3
     
-    - name: Configurar Python
+    - name: 🐍 Configurar Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+        cache: 'pip'
     
-    - name: Instalar Chrome
+    - name: 🌐 Instalar Google Chrome
       run: |
-        # Instalar Chrome usando método moderno
+        echo "📦 Instalando Google Chrome..."
         sudo apt-get update
-        sudo apt-get install -y wget
+        sudo apt-get install -y wget gnupg
         
-        # Agregar repositorio Chrome correctamente
-        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
-        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        # Añadir repositorio de Chrome
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        
+        # Instalar Chrome
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
         
-        # Verificar versión
+        # Verificar instalación
         echo "✅ Chrome instalado:"
         google-chrome --version
     
-    - name: Instalar dependencias Python
+    - name: 📦 Instalar dependencias Python
       run: |
+        echo "📦 Instalando dependencias..."
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        
-        # Verificar que webdriver-manager funciona
-        python -c "
-import os
-os.environ['WDM_LOCAL'] = '0'
-os.environ['WDM_SSL_VERIFY'] = '0'
-os.environ['WDM_LOG_LEVEL'] = '0'
-print('✅ Configuración webdriver-manager completada')
-        "
+        echo "✅ Dependencias instaladas"
     
-    - name: Configurar webdriver-manager para GitHub Actions
+    - name: ⚙️ Configurar variables de entorno
       run: |
-        # Crear directorio para cache de webdriver-manager
-        mkdir -p ~/.wdm
-        chmod -R 755 ~/.wdm
-        
-        # Configurar variables de entorno
+        # Variables para webdriver-manager
         echo "WDM_LOCAL=0" >> $GITHUB_ENV
         echo "WDM_SSL_VERIFY=0" >> $GITHUB_ENV
         echo "WDM_LOG_LEVEL=0" >> $GITHUB_ENV
+        echo "GITHUB_ACTIONS=true" >> $GITHUB_ENV
+        
+        # Crear directorio para cache
+        mkdir -p ~/.wdm
+        chmod -R 755 ~/.wdm
+        
+        echo "✅ Variables de entorno configuradas"
     
-    - name: Verificar instalaciones
+    - name: 🔍 Verificar instalaciones
       run: |
-        echo "=== VERIFICACIÓN DE INSTALACIONES ==="
+        echo "=== 🔍 VERIFICACIÓN DE INSTALACIONES ==="
         echo "Python: $(python --version)"
         echo "Chrome: $(google-chrome --version)"
-        echo "Pip: $(pip --version)"
+        echo "Pip packages:"
+        pip list | grep -E "selenium|webdriver"
         
-        # Verificar que podemos importar webdriver_manager
+        # Test de importación
         python -c "
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-
-print('✅ Importaciones exitosas')
-print('✅ ChromeDriverManager disponible')
+print('✅ Todas las importaciones exitosas')
         "
     
-    - name: Ejecutar monitor de reservas
+    - name: 🤖 Ejecutar monitor de reservas
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         USUARIO_CLUB: ${{ secrets.USUARIO_CLUB }}
         PASSWORD_CLUB: ${{ secrets.PASSWORD_CLUB }}
-        # Variables para webdriver-manager
         WDM_LOCAL: "0"
         WDM_SSL_VERIFY: "0"
         WDM_LOG_LEVEL: "0"
+        GITHUB_ACTIONS: "true"
       run: |
-        echo "🏓 Iniciando monitor de reservas de pádel..."
-        echo "URLs configuradas:"
-        echo "- Login: https://www.tirofederalgchu.com/web/mi-cuenta/"
-        echo "- Reservas: https://www.tirofederalgchu.com/web/producto/canchas-padel/"
+        echo "🏃 Iniciando monitor de reservas de pádel..."
+        echo "🕒 Timestamp: $(date)"
+        echo ""
         
-        # Crear directorio para logs
-        mkdir -p logs
+        # Ejecutar monitor
+        python monitor.py 2>&1 | tee monitor.log
         
-        # Ejecutar script con redirección de logs
-        python monitor.py 2>&1 | tee logs/monitor-$(date +%Y%m%d-%H%M%S).log
+        # Guardar código de salida
+        EXIT_CODE=${PIPESTATUS[0]}
         
-        # Verificar resultado
-        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        echo ""
+        echo "=== 📊 RESULTADO ==="
+        if [ $EXIT_CODE -eq 0 ]; then
           echo "✅ Monitor ejecutado exitosamente"
         else
-          echo "❌ Error en la ejecución del monitor"
-          exit 1
+          echo "❌ Error en la ejecución (código: $EXIT_CODE)"
+          exit $EXIT_CODE
         fi
     
-    - name: Subir logs en caso de error
+    - name: 📤 Subir logs si hay error
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
-        name: logs-monitor-failed
+        name: logs-monitor-error-${{ github.run_number }}
         path: |
-          logs/
+          monitor.log
           *.png
-          debug_*.html
+          *.html
         retention-days: 3
+    
+    - name: ❌ Mensaje de error
+      if: failure()
+      run: |
+        echo "❌ La ejecución falló"
+        echo "Revisa los logs arriba"
