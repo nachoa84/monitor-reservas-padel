@@ -2,11 +2,6 @@ name: 🤖 Monitor Reservas Pádel
 
 on:
   schedule:
-    # ==============================================
-    # HORARIOS DE EJECUCIÓN (en UTC)
-    # Argentina está en UTC-3 (restar 3 horas)
-    # ==============================================
-    
     # MIÉRCOLES - Noche (Argentina 21:50-23:59)
     - cron: '50 0 * * 4'    # Mié 21:50 ARG = Jue 00:50 UTC
     - cron: '0 1 * * 4'     # Mié 22:00 ARG = Jue 01:00 UTC
@@ -16,11 +11,6 @@ on:
     - cron: '40 1 * * 4'    # Mié 22:40 ARG = Jue 01:40 UTC
     - cron: '50 1 * * 4'    # Mié 22:50 ARG = Jue 01:50 UTC
     - cron: '0 2 * * 4'     # Mié 23:00 ARG = Jue 02:00 UTC
-    - cron: '10 2 * * 4'    # Mié 23:10 ARG = Jue 02:10 UTC
-    - cron: '20 2 * * 4'    # Mié 23:20 ARG = Jue 02:20 UTC
-    - cron: '30 2 * * 4'    # Mié 23:30 ARG = Jue 02:30 UTC
-    - cron: '40 2 * * 4'    # Mié 23:40 ARG = Jue 02:40 UTC
-    - cron: '50 2 * * 4'    # Mié 23:50 ARG = Jue 02:50 UTC
     
     # JUEVES - Mañana (Argentina 06:00-08:00)
     - cron: '0 9 * * 4'     # Jue 06:00 ARG = Jue 09:00 UTC
@@ -28,15 +18,7 @@ on:
     - cron: '30 9 * * 4'    # Jue 06:30 ARG = Jue 09:30 UTC
     - cron: '45 9 * * 4'    # Jue 06:45 ARG = Jue 09:45 UTC
     - cron: '0 10 * * 4'    # Jue 07:00 ARG = Jue 10:00 UTC
-    - cron: '15 10 * * 4'    # Jue 07:15 ARG = Jue 10:15 UTC
-    - cron: '30 10 * * 4'    # Jue 07:30 ARG = Jue 10:30 UTC
-    - cron: '45 10 * * 4'    # Jue 07:45 ARG = Jue 10:45 UTC
-    - cron: '0 11 * * 4'    # Jue 08:00 ARG = Jue 11:00 UTC
-    
-    # Verificación extra: Jueves mediodía
-    - cron: '0 15 * * 4'    # Jue 12:00 ARG = Jue 15:00 UTC
-    
-  # También ejecutar manualmente desde GitHub
+  
   workflow_dispatch:
 
 jobs:
@@ -52,25 +34,25 @@ jobs:
       with:
         python-version: '3.10'
     
-    - name: 🔧 Instalar Chrome y ChromeDriver
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget unzip
-        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
-        CHROME_VERSION=$(google-chrome --version | cut -d ' ' -f3 | cut -d '.' -f1)
-        wget -N https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION.0.0/linux64/chromedriver-linux64.zip
-        unzip chromedriver-linux64.zip
-        sudo mv chromedriver-linux64/chromedriver /usr/local/bin/
-        sudo chmod +x /usr/local/bin/chromedriver
-    
     - name: 📦 Instalar dependencias Python
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install selenium webdriver-manager chromedriver-binary-auto
     
+    - name: 🌐 Configurar Chrome
+      run: |
+        sudo apt-get update
+        # Instalar Chrome
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+        
+        # Verificar instalación
+        echo "Chrome version:"
+        google-chrome --version
+        
     - name: 🤖 Ejecutar Monitor
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -78,9 +60,3 @@ jobs:
         USUARIO_CLUB: ${{ secrets.USUARIO_CLUB }}
         PASSWORD_CLUB: ${{ secrets.PASSWORD_CLUB }}
       run: python monitor.py
-    
-    - name: 📊 Mostrar logs si falla
-      if: failure()
-      run: |
-        echo "❌ La ejecución falló"
-        echo "Revisa los logs arriba"
