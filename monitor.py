@@ -28,8 +28,8 @@ USUARIO_CLUB = os.environ.get('USUARIO_CLUB', '')
 PASSWORD_CLUB = os.environ.get('PASSWORD_CLUB', '')
 
 # URLs del club - REEMPLAZAR CON LAS REALES
-URL_LOGIN = "https://tirofederalgualeguaychu.com/mi-cuenta"  # <-- URL de login
-URL_RESERVAS = "https://tirofederalgualeguaychu.com/reservas"  # <-- URL de reservas
+URL_LOGIN = "https://www.tirofederalgchu.com/web/mi-cuenta/"  # <-- URL de login
+URL_RESERVAS = "https://www.tirofederalgchu.com/web/producto/canchas-padel/"  # <-- URL de reservas
 
 # ============================================================================
 # FUNCIONES DE NOTIFICACIÓN
