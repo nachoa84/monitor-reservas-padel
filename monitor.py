@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MONITOR AUTOMÁTICO DE RESERVAS DE PÁDEL - VERSIÓN ACTUALIZADA
+MONITOR AUTOMÁTICO DE RESERVAS DE PÁDEL - VERSIÓN COMPLETA
 Específico para Tiro Federal Gualeguaychú
 """
 
@@ -11,11 +11,10 @@ import requests
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys  # <-- NUEVA IMPORTACIÓN
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
+from webdriver_manager.chrome import ChromeDriverManager
 
 # ============================================================================
 # CONFIGURACIÓN
@@ -27,9 +26,9 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 USUARIO_CLUB = os.environ.get('USUARIO_CLUB', '')
 PASSWORD_CLUB = os.environ.get('PASSWORD_CLUB', '')
 
-# URLs del club - REEMPLAZAR CON LAS REALES
-URL_LOGIN = "https://www.tirofederalgchu.com/web/mi-cuenta/"  # <-- URL de login
-URL_RESERVAS = "https://www.tirofederalgchu.com/web/producto/canchas-padel/"  # <-- URL de reservas
+# URLs del club - ¡IMPORTANTE! REEMPLAZAR CON LAS REALES
+URL_LOGIN = "https://tirofederalgualeguaychu.com/mi-cuenta"  # <-- VERIFICAR URL
+URL_RESERVAS = "https://tirofederalgualeguaychu.com/reservas"  # <-- VERIFICAR URL
 
 # ============================================================================
 # FUNCIONES DE NOTIFICACIÓN
@@ -38,7 +37,7 @@ URL_RESERVAS = "https://www.tirofederalgchu.com/web/producto/canchas-padel/"  # 
 def enviar_telegram(mensaje):
     """Envía mensaje por Telegram"""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Faltan credenciales de Telegram")
+        print("⚠️ Faltan credenciales de Telegram en los Secrets")
         return False
     
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -72,11 +71,11 @@ def log(mensaje):
 # ============================================================================
 
 def setup_driver():
-    """Configura el navegador Chrome para GitHub Actions"""
+    """Configura el navegador Chrome usando webdriver-manager"""
     chrome_options = Options()
     
     # Configuración para entorno cloud
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless")  # Sin ventana
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
@@ -90,11 +89,22 @@ def setup_driver():
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
     try:
-        driver = webdriver.Chrome(options=chrome_options)
+        # Usar webdriver-manager para manejar ChromeDriver automáticamente
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        log("✅ Driver configurado con webdriver-manager")
         return driver
     except Exception as e:
-        log(f"❌ Error creando driver: {e}")
-        return None
+        log(f"❌ Error con webdriver-manager: {e}")
+        
+        # Fallback: intentar sin service
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            log("✅ Driver configurado sin service")
+            return driver
+        except Exception as e2:
+            log(f"❌ Error sin service: {e2}")
+            return None
 
 def hacer_login(driver):
     """Login específico para Tiro Federal Gualeguaychú"""
@@ -115,7 +125,7 @@ def hacer_login(driver):
         
         campo_usuario.clear()
         campo_usuario.send_keys(USUARIO_CLUB)
-        log(f"📝 Usuario ingresado")
+        log("📝 Usuario ingresado")
         
         # CAMPO CONTRASEÑA
         try:
@@ -142,18 +152,22 @@ def hacer_login(driver):
             "//input[@type='submit']",
         ]
         
+        boton_encontrado = False
         for selector in selectores_boton:
             try:
                 boton_login = driver.find_element(By.XPATH, selector)
                 boton_login.click()
                 log(f"✅ Botón encontrado: {selector}")
+                boton_encontrado = True
                 break
             except:
                 continue
-        else:
+        
+        if not boton_encontrado:
             # Si no encuentra botón, presionar ENTER
             campo_password.send_keys(Keys.RETURN)
             log("✅ Login con ENTER")
+            boton_encontrado = True
         
         # Esperar login
         log("⏳ Esperando login...")
@@ -162,11 +176,18 @@ def hacer_login(driver):
         # Verificar login exitoso
         pagina_html = driver.page_source.lower()
         
-        if "error" in pagina_html or "incorrecto" in pagina_html:
+        # Buscar indicadores de error
+        if "error" in pagina_html or "incorrecto" in pagina_html or "invalid" in pagina_html:
             log("❌ Error en login - Credenciales incorrectas")
             return False
         
-        log("🎉 Login exitoso")
+        # Buscar indicadores de éxito
+        if "mi cuenta" in pagina_html or "logout" in pagina_html or "cerrar sesión" in pagina_html:
+            log("✅ Login exitoso - Página 'Mi cuenta' detectada")
+            return True
+        
+        # Si no encuentra indicadores claros, continuar de todos modos
+        log("⚠️ No se detectaron indicadores claros de login, pero continuando...")
         return True
         
     except Exception as e:
@@ -185,7 +206,7 @@ def buscar_horarios_especificos(driver):
         # Obtener HTML completo
         html_completo = driver.page_source
         
-        # Lista de patrones a buscar (insensible a mayúsculas)
+        # Lista de patrones a buscar
         patrones = [
             "20:00", "20:00", "20hs", "20 hs",
             "20 a 22", "20-22", "20:00 a 22:00",
@@ -196,9 +217,9 @@ def buscar_horarios_especificos(driver):
         
         # Buscar cada patrón
         for patron in patrones:
-            if patron in html_completo:
-                # Encontrar contexto alrededor del horario
-                inicio = html_completo.find(patron)
+            if patron.lower() in html_completo.lower():
+                # Encontrar contexto
+                inicio = html_completo.lower().find(patron.lower())
                 contexto = html_completo[max(0, inicio-50):min(len(html_completo), inicio+50)]
                 horarios_encontrados.append({
                     "horario": patron,
@@ -206,20 +227,20 @@ def buscar_horarios_especificos(driver):
                 })
                 log(f"✅ Encontrado: {patron}")
         
-        # También buscar en elementos de botón/reserva
+        # También buscar en elementos visibles
         try:
-            elementos = driver.find_elements(By.XPATH, "//*[contains(text(), '20')]")
+            elementos = driver.find_elements(By.XPATH, "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '20')]")
             for elemento in elementos:
                 texto = elemento.text
-                if any(hora in texto for hora in ["20", "8 pm", "8pm"]):
+                if any(hora in texto.lower() for hora in ["20", "8 pm", "8pm"]):
                     if "22" in texto or "reservar" in texto.lower():
                         horarios_encontrados.append({
                             "horario": texto[:30],
                             "tipo": "elemento_web"
                         })
                         log(f"✅ En elemento web: {texto[:30]}...")
-        except:
-            pass
+        except Exception as e:
+            log(f"⚠️ Error buscando elementos: {e}")
         
         return horarios_encontrados
         
@@ -233,29 +254,30 @@ def intentar_reserva_automatica(driver, horario_info):
         horario = horario_info.get("horario", "")
         log(f"🎯 Intentando reservar: {horario}")
         
-        # Estrategia 1: Buscar botones que contengan el horario
-        elementos = driver.find_elements(By.XPATH, f"//*[contains(text(), '{horario[:5]}')]")
+        # Estrategia 1: Buscar elementos que contengan el horario
+        elementos_con_horario = driver.find_elements(By.XPATH, f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{str(horario).lower()[:5]}')]")
         
-        for elemento in elementos:
+        for elemento in elementos_con_horario[:5]:  # Limitar a primeros 5
             try:
-                # Buscar botón de reserva cerca
+                # Buscar botón de reserva en el mismo contenedor
                 parent = elemento.find_element(By.XPATH, "..")
                 botones = parent.find_elements(By.TAG_NAME, "button")
                 
                 for btn in botones:
-                    if "reservar" in btn.text.lower() or "reserva" in btn.text.lower():
+                    btn_text = btn.text.lower()
+                    if "reservar" in btn_text or "reserva" in btn_text or "seleccionar" in btn_text:
                         btn.click()
-                        log("✅ Click en botón Reservar")
+                        log("✅ Click en botón Reservar/Seleccionar")
                         time.sleep(2)
                         
                         # Confirmar si hay popup
                         try:
-                            confirmar = driver.find_element(By.XPATH, "//button[contains(text(), 'Confirmar')]")
+                            confirmar = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'confirmar')]")
                             confirmar.click()
                             log("✅ Reserva confirmada")
                             return True
                         except:
-                            log("⚠️ No hubo confirmación, pero se hizo click")
+                            log("⚠️ No hubo confirmación, pero se hizo click en reservar")
                             return True
             except:
                 continue
@@ -263,7 +285,7 @@ def intentar_reserva_automatica(driver, horario_info):
         # Estrategia 2: Buscar enlaces de reserva
         try:
             enlaces = driver.find_elements(By.PARTIAL_LINK_TEXT, "Reservar")
-            for enlace in enlaces:
+            for enlace in enlaces[:3]:  # Limitar a primeros 3
                 enlace.click()
                 log("✅ Click en enlace Reservar")
                 time.sleep(2)
@@ -291,6 +313,7 @@ def ejecutar_monitor():
     # Verificar credenciales
     if not all([TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, USUARIO_CLUB, PASSWORD_CLUB]):
         log("❌ Faltan variables en GitHub Secrets")
+        log("   Verifica: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, USUARIO_CLUB, PASSWORD_CLUB")
         return False
     
     # Notificación de inicio
@@ -312,7 +335,7 @@ def ejecutar_monitor():
         
         # 2. Login
         if not hacer_login(driver):
-            enviar_telegram("❌ Error en login - Verificar credenciales")
+            enviar_telegram("❌ Error en login - Verificar credenciales o URLs")
             return False
         
         # 3. Buscar horarios
@@ -331,7 +354,7 @@ def ejecutar_monitor():
             for i, horario in enumerate(horarios[:5], 1):  # Máximo 5
                 mensaje_horarios += f"{i}. {horario['horario']}\n"
             
-            mensaje_horarios += f"\n🔗 <a href='{URL_RESERVAS}'>Ir a reservar ahora</a>\n"
+            mensaje_horarios += f"\n🔗 <b>URL:</b> {URL_RESERVAS}\n"
             mensaje_horarios += "⚡ <i>¡No esperes, corré a reservar!</i>"
             
             # Enviar alerta
@@ -339,6 +362,7 @@ def ejecutar_monitor():
             
             # Intentar reservar el primer horario
             if horarios and len(horarios) > 0:
+                log("🔄 Intentando reserva automática...")
                 reservado = intentar_reserva_automatica(driver, horarios[0])
                 if reservado:
                     enviar_telegram(f"✅ <b>¡RESERVA AUTOMÁTICA EXITOSA!</b>\nHorario: {horarios[0]['horario']}")
@@ -349,13 +373,14 @@ def ejecutar_monitor():
             mensaje_vacio = f"""
 📭 <b>Sin disponibilidad</b>
 🕒 {datetime.now().strftime('%H:%M:%S')}
+📅 {datetime.now().strftime('%d/%m/%Y')}
 ⚠️ No hay horarios 20-22 hs disponibles
 """
             enviar_telegram(mensaje_vacio)
             return False
             
     except Exception as e:
-        log(f"❌ ERROR: {e}")
+        log(f"❌ ERROR CRÍTICO: {e}")
         enviar_telegram(f"❌ <b>Error en monitor:</b>\n{str(e)[:150]}")
         return False
         
@@ -376,5 +401,12 @@ def ejecutar_monitor():
 # ============================================================================
 
 if __name__ == "__main__":
+    # Verificar que estamos en GitHub Actions
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        log("🚀 Ejecutando en GitHub Actions")
+    else:
+        log("💻 Ejecutando localmente")
+    
+    # Ejecutar monitor
     exit_code = 0 if ejecutar_monitor() else 1
     sys.exit(exit_code)
