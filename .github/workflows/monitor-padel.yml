@@ -50,15 +50,12 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y wget gnupg
         
-        # Añadir repositorio de Chrome
         wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
         echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
         
-        # Instalar Chrome
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
         
-        # Verificar instalación
         echo "✅ Chrome instalado:"
         google-chrome --version
     
@@ -71,13 +68,11 @@ jobs:
     
     - name: ⚙️ Configurar variables de entorno
       run: |
-        # Variables para webdriver-manager
         echo "WDM_LOCAL=0" >> $GITHUB_ENV
         echo "WDM_SSL_VERIFY=0" >> $GITHUB_ENV
         echo "WDM_LOG_LEVEL=0" >> $GITHUB_ENV
         echo "GITHUB_ACTIONS=true" >> $GITHUB_ENV
         
-        # Crear directorio para cache
         mkdir -p ~/.wdm
         chmod -R 755 ~/.wdm
         
@@ -91,13 +86,12 @@ jobs:
         echo "Pip packages:"
         pip list | grep -E "selenium|webdriver"
         
-        # Test de importación
-        python -c "
+        python << 'EOF'
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 print('✅ Todas las importaciones exitosas')
-        "
+EOF
     
     - name: 🤖 Ejecutar monitor de reservas
       env:
@@ -114,10 +108,8 @@ print('✅ Todas las importaciones exitosas')
         echo "🕒 Timestamp: $(date)"
         echo ""
         
-        # Ejecutar monitor
         python monitor.py 2>&1 | tee monitor.log
         
-        # Guardar código de salida
         EXIT_CODE=${PIPESTATUS[0]}
         
         echo ""
