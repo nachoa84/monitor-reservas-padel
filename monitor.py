@@ -14,6 +14,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 # ============================================================================
@@ -26,9 +28,9 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 USUARIO_CLUB = os.environ.get('USUARIO_CLUB', '')
 PASSWORD_CLUB = os.environ.get('PASSWORD_CLUB', '')
 
-# URLs del club - ¡IMPORTANTE! REEMPLAZAR CON LAS REALES
-URL_LOGIN = "https://tirofederalgualeguaychu.com/mi-cuenta"  # <-- VERIFICAR URL
-URL_RESERVAS = "https://tirofederalgualeguaychu.com/reservas"  # <-- VERIFICAR URL
+# URLs CORREGIDAS según lo que me enviaste
+URL_LOGIN = "https://www.tirofederalgchu.com/web/mi-cuenta/"
+URL_RESERVAS = "https://www.tirofederalgchu.com/web/producto/canchas-padel/"
 
 # ============================================================================
 # FUNCIONES DE NOTIFICACIÓN
@@ -75,11 +77,12 @@ def setup_driver():
     chrome_options = Options()
     
     # Configuración para entorno cloud
-    chrome_options.add_argument("--headless")  # Sin ventana
+    chrome_options.add_argument("--headless=new")  # Headless moderno
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
     # User Agent real
     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -88,52 +91,89 @@ def setup_driver():
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
     
+    # Preferencias para evitar detección
+    chrome_options.add_experimental_option("prefs", {
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False
+    })
+    
     try:
         # Usar webdriver-manager para manejar ChromeDriver automáticamente
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        log("✅ Driver configurado con webdriver-manager")
+        
+        # Script para evitar detección
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': '''
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            '''
+        })
+        
+        log("✅ Driver configurado correctamente")
         return driver
     except Exception as e:
-        log(f"❌ Error con webdriver-manager: {e}")
-        
-        # Fallback: intentar sin service
-        try:
-            driver = webdriver.Chrome(options=chrome_options)
-            log("✅ Driver configurado sin service")
-            return driver
-        except Exception as e2:
-            log(f"❌ Error sin service: {e2}")
-            return None
+        log(f"❌ Error configurando driver: {e}")
+        return None
 
 def hacer_login(driver):
     """Login específico para Tiro Federal Gualeguaychú"""
     try:
-        log("🔐 Intentando login en Tiro Federal...")
+        log(f"🔐 Intentando login en: {URL_LOGIN}")
         driver.get(URL_LOGIN)
-        time.sleep(5)
         
-        log("📝 Buscando campos de login (username/password)...")
+        # Esperar con timeout
+        wait = WebDriverWait(driver, 15)
+        time.sleep(3)
         
-        # CAMPO USUARIO
-        try:
-            campo_usuario = driver.find_element(By.ID, "username")
-            log("✅ Campo usuario por ID")
-        except:
-            campo_usuario = driver.find_element(By.NAME, "username")
-            log("✅ Campo usuario por NAME")
+        log("📝 Buscando campos de login...")
+        
+        # CAMPO USUARIO - Buscar con múltiples selectores
+        campo_usuario = None
+        selectores_usuario = [
+            (By.ID, "username"),
+            (By.NAME, "username"),
+            (By.XPATH, "//input[@type='text' or @type='email']"),
+            (By.CSS_SELECTOR, "input[name='username'], input[name='email'], input[type='text']")
+        ]
+        
+        for selector_type, selector_value in selectores_usuario:
+            try:
+                campo_usuario = wait.until(EC.presence_of_element_located((selector_type, selector_value)))
+                log(f"✅ Campo usuario encontrado: {selector_type}={selector_value}")
+                break
+            except:
+                continue
+        
+        if not campo_usuario:
+            log("❌ No se encontró campo de usuario")
+            return False
         
         campo_usuario.clear()
         campo_usuario.send_keys(USUARIO_CLUB)
         log("📝 Usuario ingresado")
         
         # CAMPO CONTRASEÑA
-        try:
-            campo_password = driver.find_element(By.ID, "password")
-            log("✅ Campo contraseña por ID")
-        except:
-            campo_password = driver.find_element(By.NAME, "password")
-            log("✅ Campo contraseña por NAME")
+        campo_password = None
+        selectores_password = [
+            (By.ID, "password"),
+            (By.NAME, "password"),
+            (By.XPATH, "//input[@type='password']"),
+            (By.CSS_SELECTOR, "input[type='password']")
+        ]
+        
+        for selector_type, selector_value in selectores_password:
+            try:
+                campo_password = driver.find_element(selector_type, selector_value)
+                log(f"✅ Campo contraseña encontrado: {selector_type}={selector_value}")
+                break
+            except:
+                continue
+        
+        if not campo_password:
+            log("❌ No se encontró campo de contraseña")
+            return False
         
         campo_password.clear()
         campo_password.send_keys(PASSWORD_CLUB)
@@ -142,106 +182,144 @@ def hacer_login(driver):
         # BUSCAR BOTÓN DE LOGIN
         log("🔍 Buscando botón de login...")
         
-        # Selectores específicos para Woocommerce (que usa tu club)
         selectores_boton = [
-            "//button[@name='login']",
-            "//button[@type='submit']",
-            "//button[contains(@class, 'woocommerce-button')]",
-            "//button[contains(@class, 'woocommerce-form-login__submit')]",
-            "//input[@name='login']",
-            "//input[@type='submit']",
+            (By.XPATH, "//button[@type='submit' or @name='login']"),
+            (By.XPATH, "//input[@type='submit']"),
+            (By.CSS_SELECTOR, "button[type='submit'], input[type='submit']"),
+            (By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'iniciar')]"),
+            (By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'ingresar')]"),
         ]
         
-        boton_encontrado = False
-        for selector in selectores_boton:
+        boton_login = None
+        for selector_type, selector_value in selectores_boton:
             try:
-                boton_login = driver.find_element(By.XPATH, selector)
-                boton_login.click()
-                log(f"✅ Botón encontrado: {selector}")
-                boton_encontrado = True
+                boton_login = driver.find_element(selector_type, selector_value)
+                log(f"✅ Botón login encontrado: {selector_type}={selector_value}")
                 break
             except:
                 continue
         
-        if not boton_encontrado:
+        if boton_login:
+            boton_login.click()
+            log("✅ Botón clickeado")
+        else:
             # Si no encuentra botón, presionar ENTER
             campo_password.send_keys(Keys.RETURN)
             log("✅ Login con ENTER")
-            boton_encontrado = True
         
-        # Esperar login
+        # Esperar login (con timeout)
         log("⏳ Esperando login...")
         time.sleep(5)
         
         # Verificar login exitoso
+        current_url = driver.current_url
         pagina_html = driver.page_source.lower()
         
-        # Buscar indicadores de error
-        if "error" in pagina_html or "incorrecto" in pagina_html or "invalid" in pagina_html:
-            log("❌ Error en login - Credenciales incorrectas")
+        log(f"📄 URL actual: {current_url}")
+        
+        # Si sigue en la misma página, login probablemente falló
+        if URL_LOGIN in current_url:
+            log("⚠️ Sigue en página de login - posible falla")
             return False
         
         # Buscar indicadores de éxito
         if "mi cuenta" in pagina_html or "logout" in pagina_html or "cerrar sesión" in pagina_html:
-            log("✅ Login exitoso - Página 'Mi cuenta' detectada")
+            log("✅ Login exitoso detectado")
             return True
         
-        # Si no encuentra indicadores claros, continuar de todos modos
-        log("⚠️ No se detectaron indicadores claros de login, pero continuando...")
+        # Si no encuentra indicadores claros, verificar por URL de reservas
+        driver.get(URL_RESERVAS)
+        time.sleep(3)
+        
+        if URL_RESERVAS in driver.current_url:
+            log("✅ Acceso a reservas exitoso")
+            return True
+        
+        log("⚠️ Login resultó ambiguo, pero continuando...")
         return True
         
     except Exception as e:
         log(f"❌ Error en login: {e}")
+        # Tomar screenshot para debugging
+        try:
+            driver.save_screenshot("error_login.png")
+            log("📸 Screenshot guardado como error_login.png")
+        except:
+            pass
         return False
 
 def buscar_horarios_especificos(driver):
     """Busca horarios específicos de 20-22 hs"""
     try:
-        log("🔍 Buscando horarios 20-22 hs...")
+        log(f"🔍 Buscando horarios en: {URL_RESERVAS}")
         
-        # Ir a reservas (o refrescar si ya estamos allí)
+        # Ir a reservas
         driver.get(URL_RESERVAS)
         time.sleep(4)
         
+        # Tomar screenshot para debugging
+        try:
+            driver.save_screenshot("pagina_reservas.png")
+            log("📸 Screenshot de reservas guardado")
+        except:
+            pass
+        
         # Obtener HTML completo
         html_completo = driver.page_source
+        log(f"📄 Tamaño HTML: {len(html_completo)} caracteres")
+        
+        # Guardar HTML para debugging
+        with open("debug_reservas.html", "w", encoding="utf-8") as f:
+            f.write(html_completo)
         
         # Lista de patrones a buscar
         patrones = [
             "20:00", "20:00", "20hs", "20 hs",
             "20 a 22", "20-22", "20:00 a 22:00",
-            "20.00", "20:00hs", "20 h", "8 pm", "8pm"
+            "20.00", "20:00hs", "20 h", "8 pm", "8pm",
+            "20hs", "21:00", "21hs", "22:00", "22hs"
         ]
         
         horarios_encontrados = []
         
         # Buscar cada patrón
         for patron in patrones:
-            if patron.lower() in html_completo.lower():
-                # Encontrar contexto
+            conteo = html_completo.lower().count(patron.lower())
+            if conteo > 0:
+                # Encontrar contexto del primer match
                 inicio = html_completo.lower().find(patron.lower())
-                contexto = html_completo[max(0, inicio-50):min(len(html_completo), inicio+50)]
+                contexto = html_completo[max(0, inicio-100):min(len(html_completo), inicio+100)]
+                contexto_limpio = ' '.join(contexto.replace('\n', ' ').split())
+                
                 horarios_encontrados.append({
                     "horario": patron,
-                    "contexto": contexto.replace('\n', ' ').strip()
+                    "conteo": conteo,
+                    "contexto": contexto_limpio[:150] + "..."
                 })
-                log(f"✅ Encontrado: {patron}")
+                log(f"✅ Encontrado '{patron}' {conteo} veces")
         
         # También buscar en elementos visibles
         try:
-            elementos = driver.find_elements(By.XPATH, "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '20')]")
+            elementos = driver.find_elements(By.XPATH, "//*[contains(text(), '20') or contains(text(), '21') or contains(text(), '22')]")
             for elemento in elementos:
-                texto = elemento.text
-                if any(hora in texto.lower() for hora in ["20", "8 pm", "8pm"]):
-                    if "22" in texto or "reservar" in texto.lower():
+                texto = elemento.text.strip()
+                if texto and any(hora in texto.lower() for hora in ["20", "21", "22", "8 pm", "8pm", "9 pm", "9pm"]):
+                    # Verificar que sea un horario (no solo un número aleatorio)
+                    if ":" in texto or "hs" in texto.lower() or "h" in texto.lower():
                         horarios_encontrados.append({
-                            "horario": texto[:30],
-                            "tipo": "elemento_web"
+                            "horario": texto[:50],
+                            "tipo": "elemento_visible",
+                            "tag": elemento.tag_name
                         })
-                        log(f"✅ En elemento web: {texto[:30]}...")
+                        log(f"✅ En elemento {elemento.tag_name}: '{texto[:50]}...'")
         except Exception as e:
             log(f"⚠️ Error buscando elementos: {e}")
         
+        if horarios_encontrados:
+            log(f"🎉 ¡ENCONTRADOS {len(horarios_encontrados)} HORARIOS!")
+        else:
+            log("📭 No se encontraron horarios 20-22 hs")
+            
         return horarios_encontrados
         
     except Exception as e:
@@ -254,46 +332,53 @@ def intentar_reserva_automatica(driver, horario_info):
         horario = horario_info.get("horario", "")
         log(f"🎯 Intentando reservar: {horario}")
         
-        # Estrategia 1: Buscar elementos que contengan el horario
+        # Estrategia 1: Buscar elementos que contengan el horario y estén clickeables
         elementos_con_horario = driver.find_elements(By.XPATH, f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{str(horario).lower()[:5]}')]")
         
-        for elemento in elementos_con_horario[:5]:  # Limitar a primeros 5
+        for elemento in elementos_con_horario[:10]:  # Limitar a primeros 10
             try:
-                # Buscar botón de reserva en el mismo contenedor
-                parent = elemento.find_element(By.XPATH, "..")
-                botones = parent.find_elements(By.TAG_NAME, "button")
-                
-                for btn in botones:
-                    btn_text = btn.text.lower()
-                    if "reservar" in btn_text or "reserva" in btn_text or "seleccionar" in btn_text:
-                        btn.click()
-                        log("✅ Click en botón Reservar/Seleccionar")
-                        time.sleep(2)
+                # Verificar si es clickeable
+                if elemento.is_displayed() and elemento.is_enabled():
+                    # Buscar botón de reserva cercano
+                    try:
+                        # Primero buscar en el mismo elemento
+                        if elemento.tag_name.lower() in ['button', 'a', 'input']:
+                            log(f"🖱️ Intentando click en elemento: {elemento.tag_name}")
+                            elemento.click()
+                            time.sleep(2)
+                            log("✅ Click realizado")
+                            return True
                         
-                        # Confirmar si hay popup
-                        try:
-                            confirmar = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'confirmar')]")
-                            confirmar.click()
-                            log("✅ Reserva confirmada")
-                            return True
-                        except:
-                            log("⚠️ No hubo confirmación, pero se hizo click en reservar")
-                            return True
+                        # Buscar en elementos padres
+                        for _ in range(3):  # Buscar hasta 3 niveles arriba
+                            elemento = elemento.find_element(By.XPATH, "..")
+                            botones = elemento.find_elements(By.TAG_NAME, "button")
+                            
+                            for btn in botones:
+                                btn_text = btn.text.lower()
+                                if "reservar" in btn_text or "seleccionar" in btn_text or "reserva" in btn_text:
+                                    btn.click()
+                                    log("✅ Click en botón de reserva")
+                                    time.sleep(2)
+                                    return True
+                    except:
+                        continue
             except:
                 continue
         
-        # Estrategia 2: Buscar enlaces de reserva
+        # Estrategia 2: Buscar botones de reserva generales
         try:
-            enlaces = driver.find_elements(By.PARTIAL_LINK_TEXT, "Reservar")
-            for enlace in enlaces[:3]:  # Limitar a primeros 3
-                enlace.click()
-                log("✅ Click en enlace Reservar")
-                time.sleep(2)
-                return True
+            botones_reserva = driver.find_elements(By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'reservar') or contains(text(), 'Reservar')]")
+            for btn in botones_reserva[:3]:
+                if btn.is_displayed() and btn.is_enabled():
+                    btn.click()
+                    log("✅ Click en botón 'Reservar'")
+                    time.sleep(2)
+                    return True
         except:
             pass
         
-        log("⚠️ No se pudo reservar automáticamente")
+        log("⚠️ No se pudo reservar automáticamente - reserva manual requerida")
         return False
         
     except Exception as e:
@@ -322,6 +407,7 @@ def ejecutar_monitor():
 🏢 Tiro Federal Gualeguaychú
 🕒 {datetime.now().strftime('%H:%M:%S')}
 📅 {datetime.now().strftime('%d/%m/%Y')}
+🔗 {URL_RESERVAS}
 """
     enviar_telegram(mensaje_inicio)
     
@@ -349,13 +435,17 @@ def ejecutar_monitor():
             mensaje_horarios += f"🏢 <b>Club:</b> Tiro Federal\n"
             mensaje_horarios += f"📅 <b>Fecha:</b> {datetime.now().strftime('%d/%m')}\n"
             mensaje_horarios += f"🕒 <b>Hora detección:</b> {datetime.now().strftime('%H:%M:%S')}\n\n"
-            mensaje_horarios += "<b>Horarios encontrados:</b>\n"
+            mensaje_horarios += f"<b>Total encontrados:</b> {len(horarios)}\n\n"
+            mensaje_horarios += "<b>Detalles:</b>\n"
             
-            for i, horario in enumerate(horarios[:5], 1):  # Máximo 5
-                mensaje_horarios += f"{i}. {horario['horario']}\n"
+            for i, horario in enumerate(horarios[:8], 1):  # Máximo 8
+                if 'conteo' in horario:
+                    mensaje_horarios += f"{i}. {horario['horario']} (aparece {horario['conteo']} veces)\n"
+                else:
+                    mensaje_horarios += f"{i}. {horario['horario'][:50]}...\n"
             
-            mensaje_horarios += f"\n🔗 <b>URL:</b> {URL_RESERVAS}\n"
-            mensaje_horarios += "⚡ <i>¡No esperes, corré a reservar!</i>"
+            mensaje_horarios += f"\n🔗 <b>URL directa:</b> {URL_RESERVAS}\n"
+            mensaje_horarios += "⚡ <i>¡Reserva rápido antes que se acaben!</i>"
             
             # Enviar alerta
             enviar_telegram(mensaje_horarios)
@@ -365,7 +455,7 @@ def ejecutar_monitor():
                 log("🔄 Intentando reserva automática...")
                 reservado = intentar_reserva_automatica(driver, horarios[0])
                 if reservado:
-                    enviar_telegram(f"✅ <b>¡RESERVA AUTOMÁTICA EXITOSA!</b>\nHorario: {horarios[0]['horario']}")
+                    enviar_telegram(f"✅ <b>¡INTENTO DE RESERVA AUTOMÁTICA!</b>\nHorario: {horarios[0]['horario']}\nVerifica en el sitio si se completó.")
             
             return True
         else:
@@ -375,6 +465,7 @@ def ejecutar_monitor():
 🕒 {datetime.now().strftime('%H:%M:%S')}
 📅 {datetime.now().strftime('%d/%m/%Y')}
 ⚠️ No hay horarios 20-22 hs disponibles
+🔗 {URL_RESERVAS}
 """
             enviar_telegram(mensaje_vacio)
             return False
